@@ -70,7 +70,7 @@ code { background: #e2e8f0; padding: 1px 5px; border-radius: 5px; }
 .main-shell {
   height: calc(100vh - 98px);
   padding: 14px 18px;
-  overflow: hidden;
+  overflow: auto;
 }
 .tab-page { display: none; height: 100%; min-height: 0; }
 .tab-page.active { display: block; }
@@ -98,7 +98,10 @@ code { background: #e2e8f0; padding: 1px 5px; border-radius: 5px; }
   display: flex;
   flex-direction: column;
 }
-.analysis-card { overflow: auto; }
+.preview-card, .analysis-card {
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
 .full-card { max-width: none; }
 .panel-header { display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px; gap: 10px; }
 .panel-header h2 { margin: 0 0 3px; }
@@ -140,6 +143,32 @@ code { background: #e2e8f0; padding: 1px 5px; border-radius: 5px; }
   justify-content: center;
   overflow: hidden;
   position: relative;
+}
+
+@media (max-height: 760px) {
+  .topbar {
+    height: 50px;
+    padding: 6px 18px;
+  }
+  .topbar p { display: none; }
+  .tabs { height: 38px; }
+  .tab { padding: 7px 16px; }
+  .main-shell {
+    height: calc(100vh - 88px);
+    padding: 10px 14px;
+  }
+  .card { padding: 12px 14px; }
+  .panel-header { margin-bottom: 8px; }
+  .field { margin-bottom: 8px; }
+  .subpanel {
+    margin: 8px 0;
+    padding: 9px;
+  }
+  .drop-zone { min-height: 220px; }
+  .actions {
+    margin-top: 10px;
+    padding-top: 10px;
+  }
 }
 .drop-zone.dragover { background: #eff6ff; border-color: #2563eb; }
 .preview-empty { color: #64748b; text-align: center; line-height: 1.7; padding: 18px; }
@@ -835,6 +864,31 @@ tr.outlier-profile-row.selected-profile-row td {
   #tab-result #profileChart { height: 145px; }
   #tab-result .profile-peaks-wrap { max-height: 125px; }
   #tab-result .csv-table-wrap { min-height: 170px; }
+}
+
+/* Result tab dual-scroll layout.
+   The CSV Result card can scroll as a whole on short windows, while the CSV
+   table keeps its own internal scroll and sticky header. */
+#tab-result .full-card {
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  scrollbar-gutter: stable;
+}
+
+#tab-result .csv-table-wrap {
+  flex: 0 0 auto;
+  height: clamp(190px, 34vh, 420px);
+  min-height: 0;
+  overflow: auto;
+}
+
+@media (max-height: 820px) {
+  #tab-result .csv-table-wrap {
+    height: clamp(170px, 30vh, 320px);
+  }
 }
 
 /* Defect Pixel Analysis */
