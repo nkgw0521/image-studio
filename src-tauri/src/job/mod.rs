@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisKind {
     Measure,
-    Particles,
     Profile,
+    WhiteDefectPixels,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,8 +21,11 @@ pub struct JobRequest {
     pub base_name: String,
     pub analysis: AnalysisKind,
     pub roi: Option<Roi>,
-    pub particles: ParticleParams,
     pub profile: ProfileParams,
+    #[serde(default)]
+    pub raw_image: RawImageParams,
+    #[serde(rename = "white_defect_pixels", alias = "defect_pixels")]
+    pub defect_pixels: DefectPixelParams,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -34,10 +37,18 @@ pub struct Roi {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ParticleParams {
-    pub threshold: String,
-    pub min_area: f64,
-    pub max_area: Option<f64>,
+pub struct DefectPixelParams {
+    pub white_threshold: i32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawImageParams {
+    pub enabled: bool,
+    pub width: u32,
+    pub height: u32,
+    pub bit_depth: u16,
+    pub endian: String,
+    pub header_offset: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -48,9 +59,22 @@ pub struct ProfileParams {
     pub y2: i32,
 }
 
-impl Default for ParticleParams {
+impl Default for DefectPixelParams {
     fn default() -> Self {
-        Self { threshold: "Otsu dark".to_string(), min_area: 20.0, max_area: None }
+        Self { white_threshold: 240 }
+    }
+}
+
+impl Default for RawImageParams {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            width: 0,
+            height: 0,
+            bit_depth: 8,
+            endian: "little".to_string(),
+            header_offset: 0,
+        }
     }
 }
 
@@ -62,11 +86,13 @@ impl Default for ProfileParams {
 
 impl JobRequest {
     pub fn validate(&self) -> Result<(), AppError> {
-        if self.imagej_path.trim().is_empty() {
-            return Err(AppError::Validation("ImageJ/Fiji executable is required".into()));
-        }
-        if !Path::new(&self.imagej_path).is_file() {
-            return Err(AppError::Validation(format!("ImageJ/Fiji executable not found: {}", self.imagej_path)));
+        if !matches!(self.analysis, AnalysisKind::WhiteDefectPixels) {
+            if self.imagej_path.trim().is_empty() {
+                return Err(AppError::Validation("ImageJ/Fiji executable is required".into()));
+            }
+            if !Path::new(&self.imagej_path).is_file() {
+                return Err(AppError::Validation(format!("ImageJ/Fiji executable not found: {}", self.imagej_path)));
+            }
         }
         if self.input_image.trim().is_empty() {
             return Err(AppError::Validation("Input image is required".into()));
@@ -87,6 +113,18 @@ impl JobRequest {
         if let Some(roi) = &self.roi {
             if roi.width <= 0 || roi.height <= 0 {
                 return Err(AppError::Validation("ROI width/height must be positive".into()));
+            }
+        }
+        if self.raw_image.enabled {
+            if self.raw_image.width == 0 || self.raw_image.height == 0 {
+                return Err(AppError::Validation("RAW width/height must be positive".into()));
+            }
+            if !(1..=16).contains(&self.raw_image.bit_depth) {
+                return Err(AppError::Validation("RAW bit depth must be 1..16".into()));
+            }
+            let endian = self.raw_image.endian.to_ascii_lowercase();
+            if endian != "little" && endian != "big" {
+                return Err(AppError::Validation("RAW endian must be little or big".into()));
             }
         }
         Ok(())

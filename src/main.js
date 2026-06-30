@@ -19,6 +19,7 @@ const state = {
   profileEval: { dnThreshold: 5, sigmaThreshold: 3 },
   profileLine: null,
   previewLineEnabled: true,
+  lastAnalysis: null,
 };
 
 const app = document.querySelector("#app");
@@ -57,9 +58,26 @@ app.innerHTML = `
             <div class="field">
               <label>Input image <span>required</span></label>
               <div class="row two-actions">
-                <input id="inputImage" placeholder="input.tif / input.png" />
+                <input id="inputImage" placeholder="input.tif / input.png / input.raw" />
                 <button id="btnInput">選択</button>
               </div>
+            </div>
+          </div>
+
+          <div id="rawPanel" class="subpanel raw-panel input-format-panel hidden">
+            <div class="input-format-header">
+              <h3>RAW input settings</h3>
+              <span class="raw-detected-badge">.raw detected</span>
+            </div>
+            <div id="rawSettings" class="raw-settings">
+              <div class="raw-grid">
+                <div class="field"><label>Width</label><input id="rawWidth" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="4608" /></div>
+                <div class="field"><label>Height</label><input id="rawHeight" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="2176" /></div>
+                <div class="field"><label>Bit depth</label><select id="rawBitDepth"><option value="8">8</option><option value="10">10 unpacked</option><option value="12">12 unpacked</option><option value="14">14 unpacked</option><option value="16">16</option></select></div>
+                <div class="field"><label>Endian</label><select id="rawEndian"><option value="little">Little</option><option value="big">Big</option></select></div>
+                <div class="field"><label>Header offset</label><input id="rawHeaderOffset" type="text" inputmode="numeric" pattern="[0-9]*" value="0" /></div>
+              </div>
+              <small class="help block-help">RAWは入力画像フォーマットの指定です。8bitは1 byte/pixel、10/12/14/16bitは16bit unpackedとして読みます。Packed RAWは未対応です。</small>
             </div>
           </div>
 
@@ -85,10 +103,11 @@ app.innerHTML = `
             <label>Analysis type</label>
             <select id="analysisType">
               <option value="measure">輝度統計 / Measure</option>
-              <option value="particles">粒子解析 / Particle Analysis</option>
               <option value="profile">ラインプロファイル / Line Profile</option>
+              <option value="white_defect_pixels">白点検出 / White Defect Pixel</option>
             </select>
           </div>
+
 
           <div class="roi-grid">
             <div class="field"><label>ROI X</label><input id="roiX" type="number" placeholder="empty" /></div>
@@ -98,13 +117,12 @@ app.innerHTML = `
           </div>
           <small class="help block-help">ROIは4項目すべて入力した場合のみ有効です。空欄なら全画像です。</small>
 
-          <div id="particlesPanel" class="subpanel hidden">
-            <h3>Particle parameters</h3>
-            <div class="field"><label>Threshold</label><input id="threshold" value="Otsu dark" /></div>
+          <div id="defectPanel" class="subpanel hidden">
+            <h3>White Defect Pixel parameters</h3>
             <div class="inline-fields">
-              <div class="field"><label>Min area</label><input id="minArea" type="number" value="20" /></div>
-              <div class="field"><label>Max area</label><input id="maxArea" type="number" placeholder="empty = Infinity" /></div>
+              <div class="field"><label>White threshold</label><input id="whiteThreshold" type="number" value="240" /></div>
             </div>
+            <small class="help block-help">黒画像を入力し、value ≥ White threshold の画素を白点としてCSVへリスト表示します。</small>
           </div>
 
           <div id="profilePanel" class="subpanel hidden">
@@ -185,7 +203,7 @@ app.innerHTML = `
         <h2>Settings</h2>
         <div class="settings-grid">
           <div class="field field-imagej">
-            <label>ImageJ/Fiji executable <span>required</span></label>
+            <label>ImageJ/Fiji executable <span>required for Measure / Line Profile</span></label>
             <div class="row imagej-row">
               <input id="imagejPath" placeholder="C:\\Fiji.app\\ImageJ-win64.exe" />
               <button id="btnImagej">選択</button>
@@ -222,9 +240,10 @@ const $ = (id) => document.querySelector(id);
 const els = {
   imagejPath: $("#imagejPath"), inputImage: $("#inputImage"), outputDir: $("#outputDir"), baseName: $("#baseName"),
   analysisType: $("#analysisType"), roiX: $("#roiX"), roiY: $("#roiY"), roiW: $("#roiW"), roiH: $("#roiH"),
-  threshold: $("#threshold"), minArea: $("#minArea"), maxArea: $("#maxArea"),
+  whiteThreshold: $("#whiteThreshold"),
+  rawPanel: $("#rawPanel"), rawSettings: $("#rawSettings"), rawWidth: $("#rawWidth"), rawHeight: $("#rawHeight"), rawBitDepth: $("#rawBitDepth"), rawEndian: $("#rawEndian"), rawHeaderOffset: $("#rawHeaderOffset"),
   lineX1: $("#lineX1"), lineY1: $("#lineY1"), lineX2: $("#lineX2"), lineY2: $("#lineY2"),
-  particlesPanel: $("#particlesPanel"), profilePanel: $("#profilePanel"),
+  defectPanel: $("#defectPanel"), profilePanel: $("#profilePanel"),
   log: $("#log"), status: $("#status"), btnRun: $("#btnRun"), btnCancel: $("#btnCancel"),
   imagePreview: $("#imagePreview"), previewEmpty: $("#previewEmpty"), previewInfo: $("#previewInfo"),
   csvInfo: $("#csvInfo"), csvTableWrap: $("#csvTableWrap"), showStderr: $("#showStderr"),
@@ -266,10 +285,14 @@ function loadSettings() {
   els.inputImage.value = s.inputImage || "";
   els.outputDir.value = s.outputDir || s.outputCsv?.replace(/[\\/][^\\/]*$/, "") || "";
   els.baseName.value = s.baseName || "result";
-  els.analysisType.value = s.analysisType || "measure";
-  els.threshold.value = s.threshold || "Otsu dark";
-  els.minArea.value = s.minArea ?? "20";
-  els.maxArea.value = s.maxArea ?? "";
+  els.analysisType.value = (s.analysisType === "particles" || s.analysisType === "defect_pixels" || s.analysisType === "white_defect_pixels") ? "white_defect_pixels" : (s.analysisType || "measure");
+  els.whiteThreshold.value = s.whiteThreshold ?? "240";
+  els.rawWidth.value = s.rawWidth ?? "";
+  els.rawHeight.value = s.rawHeight ?? "";
+  els.rawBitDepth.value = s.rawBitDepth ?? "8";
+  els.rawEndian.value = s.rawEndian ?? "little";
+  els.rawHeaderOffset.value = s.rawHeaderOffset ?? "0";
+  updateRawSettingsPanel();
   els.roiX.value = s.roiX ?? ""; els.roiY.value = s.roiY ?? ""; els.roiW.value = s.roiW ?? ""; els.roiH.value = s.roiH ?? "";
   els.lineX1.value = s.lineX1 ?? "0"; els.lineY1.value = s.lineY1 ?? "0"; els.lineX2.value = s.lineX2 ?? "100"; els.lineY2.value = s.lineY2 ?? "0";
   els.showStderr.checked = !!s.showStderr;
@@ -285,8 +308,8 @@ function loadSettings() {
 function saveSettings() {
   const s = {
     imagejPath: els.imagejPath.value, inputImage: els.inputImage.value, outputDir: els.outputDir.value, baseName: els.baseName.value,
-    analysisType: els.analysisType.value, threshold: els.threshold.value,
-    minArea: els.minArea.value, maxArea: els.maxArea.value,
+    analysisType: els.analysisType.value, whiteThreshold: els.whiteThreshold.value,
+    rawWidth: els.rawWidth.value, rawHeight: els.rawHeight.value, rawBitDepth: els.rawBitDepth.value, rawEndian: els.rawEndian.value, rawHeaderOffset: els.rawHeaderOffset.value,
     roiX: els.roiX.value, roiY: els.roiY.value, roiW: els.roiW.value, roiH: els.roiH.value,
     lineX1: els.lineX1.value, lineY1: els.lineY1.value, lineX2: els.lineX2.value, lineY2: els.lineY2.value,
     showStderr: els.showStderr.checked,
@@ -350,11 +373,42 @@ function parseLine() {
   return { x1: vals[0], y1: vals[1], x2: vals[2], y2: vals[3] };
 }
 
+function parsePositiveIntField(el, label) {
+  const s = String(el?.value ?? "").trim();
+  if (!/^\d+$/.test(s)) throw new Error(`${label} は正の整数で入力してください。`);
+  const n = Number.parseInt(s, 10);
+  if (!Number.isSafeInteger(n) || n <= 0) throw new Error(`${label} は正の整数で入力してください。`);
+  return n;
+}
+
+function parseNonNegativeIntField(el, label) {
+  const s = String(el?.value ?? "").trim();
+  if (!/^\d+$/.test(s)) throw new Error(`${label} は0以上の整数で入力してください。`);
+  const n = Number.parseInt(s, 10);
+  if (!Number.isSafeInteger(n) || n < 0) throw new Error(`${label} は0以上の整数で入力してください。`);
+  return n;
+}
+
 function requestFromUi() {
-  if (!els.imagejPath.value.trim()) throw new Error("ImageJ/Fiji executable を設定タブで指定してください。");
+  if (els.analysisType.value !== "white_defect_pixels" && !els.imagejPath.value.trim()) {
+    throw new Error("ImageJ/Fiji executable を設定タブで指定してください。");
+  }
   if (!els.inputImage.value.trim()) throw new Error("Input image を指定してください。");
   if (!els.outputDir.value.trim()) throw new Error("Output directory を設定タブで指定してください。");
   if (!els.baseName.value.trim()) throw new Error("Base name を設定タブで指定してください。");
+  if (els.analysisType.value === "white_defect_pixels") {
+    const white = Number(els.whiteThreshold.value);
+    if (!Number.isFinite(white)) throw new Error("白点検出のしきい値を数値で入力してください。");
+    if (white < 0) throw new Error("White threshold は0以上にしてください。");
+  }
+  const rawEnabled = looksLikeRawPath(els.inputImage.value);
+  const rawWidth = rawEnabled ? parsePositiveIntField(els.rawWidth, "RAW Width") : 0;
+  const rawHeight = rawEnabled ? parsePositiveIntField(els.rawHeight, "RAW Height") : 0;
+  const rawBitDepth = Number.parseInt(String(els.rawBitDepth.value || "8"), 10);
+  const rawHeaderOffset = rawEnabled ? parseNonNegativeIntField(els.rawHeaderOffset, "RAW Header offset") : 0;
+  if (rawEnabled) {
+    if (!Number.isInteger(rawBitDepth) || rawBitDepth < 1 || rawBitDepth > 16) throw new Error("RAW Bit depth は1〜16で入力してください。");
+  }
   return {
     imagej_path: els.imagejPath.value.trim(),
     input_image: els.inputImage.value.trim(),
@@ -362,17 +416,43 @@ function requestFromUi() {
     base_name: els.baseName.value.trim(),
     analysis: els.analysisType.value,
     roi: parseRoi(),
-    particles: {
-      threshold: els.threshold.value.trim() || "Otsu dark",
-      min_area: Number(els.minArea.value || 20),
-      max_area: els.maxArea.value.trim() ? Number(els.maxArea.value) : null,
+    profile: els.analysisType.value === "profile" ? parseLine() : { x1: 0, y1: 0, x2: 100, y2: 0 },
+    raw_image: {
+      enabled: rawEnabled,
+      width: rawEnabled ? rawWidth : 0,
+      height: rawEnabled ? rawHeight : 0,
+      bit_depth: rawEnabled ? rawBitDepth : 8,
+      endian: els.rawEndian.value || "little",
+      header_offset: rawEnabled ? rawHeaderOffset : 0,
     },
-    profile: parseLine(),
+    white_defect_pixels: {
+      white_threshold: Number(els.whiteThreshold.value || 240),
+    },
   };
 }
 
+function updateRawSettingsPanel() {
+  const enabled = looksLikeRawPath(els.inputImage?.value);
+  els.rawPanel?.classList.toggle("hidden", !enabled);
+  els.rawSettings?.classList.toggle("hidden", !enabled);
+  if (!enabled) return;
+
+  const w = Number.parseInt(String(els.rawWidth.value || ""), 10);
+  const h = Number.parseInt(String(els.rawHeight.value || ""), 10);
+  if (Number.isInteger(w) && w > 0 && Number.isInteger(h) && h > 0) {
+    state.imageWidth = w;
+    state.imageHeight = h;
+    els.previewInfo.textContent = `RAW image / ${w} x ${h} / ${els.rawBitDepth.value} bit / ${els.rawEndian.value} endian`;
+    updatePreviewProfileLine();
+  } else {
+    state.imageWidth = 0;
+    state.imageHeight = 0;
+    els.previewInfo.textContent = "RAW image / Width and Height are required";
+  }
+}
+
 function updateAnalysisPanels() {
-  els.particlesPanel.classList.toggle("hidden", els.analysisType.value !== "particles");
+  els.defectPanel.classList.toggle("hidden", els.analysisType.value !== "white_defect_pixels");
   els.profilePanel.classList.toggle("hidden", els.analysisType.value !== "profile");
   updatePreviewProfileLine();
 }
@@ -400,6 +480,52 @@ async function loadPreview(path = els.inputImage.value.trim()) {
   els.imagePreview.classList.add("hidden");
   els.previewEmpty.classList.remove("hidden");
   if (!path) { els.previewInfo.textContent = "No image loaded"; return; }
+  if (looksLikeRawPath(path)) {
+    updateRawSettingsPanel();
+    const w = Number.parseInt(String(els.rawWidth.value || ""), 10);
+    const h = Number.parseInt(String(els.rawHeight.value || ""), 10);
+    const bitDepth = Number.parseInt(String(els.rawBitDepth.value || "8"), 10);
+    const headerOffset = Number.parseInt(String(els.rawHeaderOffset.value || "0"), 10);
+    if (!Number.isInteger(w) || w <= 0 || !Number.isInteger(h) || h <= 0) {
+      els.previewEmpty.innerHTML = "RAWプレビューには Width / Height が必要です。";
+      els.previewInfo.textContent = "RAW image / Width and Height are required";
+      updatePreviewProfileLine();
+      return;
+    }
+    try {
+      els.previewInfo.textContent = "Loading RAW preview...";
+      const preview = await invoke("preview_raw_image_data_url", {
+        path,
+        rawImage: {
+          enabled: true,
+          width: w,
+          height: h,
+          bit_depth: bitDepth,
+          endian: els.rawEndian.value || "little",
+          header_offset: Number.isInteger(headerOffset) && headerOffset >= 0 ? headerOffset : 0,
+        },
+      });
+      els.imagePreview.onload = () => {
+        state.imageWidth = w;
+        state.imageHeight = h;
+        els.previewInfo.textContent = `${preview.file_name} / RAW ${w} x ${h} / ${bitDepth} bit / ${els.rawEndian.value} endian`;
+        updatePreviewProfileLine();
+        if (state.selectedProfilePoint) showProfileMarker(state.selectedProfilePoint);
+      };
+      els.imagePreview.onerror = () => {
+        els.previewInfo.textContent = "RAW preview decode failed.";
+      };
+      els.imagePreview.src = preview.data_url;
+      els.previewEmpty.classList.add("hidden");
+      els.imagePreview.classList.remove("hidden");
+    } catch (e) {
+      els.previewInfo.textContent = String(e);
+      els.previewEmpty.innerHTML = "RAWプレビューに失敗しました。Width / Height / Bit depth / Endian / Header offset を確認してください。";
+      els.previewEmpty.classList.remove("hidden");
+    }
+    return;
+  }
+  els.previewEmpty.innerHTML = "画像を選択してください。<br />ドラッグ&ドロップも試行できます。";
   try {
     els.previewInfo.textContent = "Loading preview...";
     const preview = await invoke("preview_image_data_url", { path });
@@ -1020,10 +1146,58 @@ function withProfileDerivedColumns(csv) {
   };
 }
 
+
+function isDefectPixelCsv(csv) {
+  if (!csv || !csv.headers) return false;
+  const needed = ["type", "x", "y", "value", "threshold", "delta"];
+  return needed.every((name) => csv.headers.some((h) => String(h).toLowerCase() === name));
+}
+
+function renderDefectPixelSummary(csv) {
+  if (!isDefectPixelCsv(csv)) return;
+  const typeCol = numericColumnIndex(csv.headers, "type");
+  const valueCol = numericColumnIndex(csv.headers, "value");
+  const deltaCol = numericColumnIndex(csv.headers, "delta");
+  const totalWhite = Number.isFinite(Number(csv.total_rows)) ? Number(csv.total_rows) : csv.rows.length;
+  let previewWhite = 0;
+  let maxWhite = null;
+  for (const row of csv.rows) {
+    const type = String(row[typeCol] || "").toLowerCase();
+    const value = Number(row[valueCol]);
+    const delta = Number(row[deltaCol]);
+    const item = { type, value, delta };
+    if (type === "white") {
+      previewWhite++;
+      if (!maxWhite || delta > maxWhite.delta) maxWhite = item;
+    }
+  }
+  if (els.profileEvalWrap) {
+    els.profileEvalWrap.classList.remove("hidden");
+    els.profileEvalWrap.innerHTML = `
+      <div class="eval-summary ${totalWhite === 0 ? "pass" : "fail"}">
+        <div class="eval-status">
+          <span>White Defect Pixel Evaluation</span>
+          <strong>${totalWhite === 0 ? "PASS" : "DETECTED"}</strong>
+          <small>${totalWhite} white defect pixel(s) detected from dark image${csv.truncated ? ` / preview shows first ${csv.rows.length}` : ""}</small>
+        </div>
+        <div class="eval-metrics">
+          <div><span>Total white pixels</span><strong>${totalWhite}</strong><small>threshold ≥ ${els.whiteThreshold.value || ""}</small></div>
+          <div><span>Preview rows</span><strong>${csv.rows.length}</strong><small>${csv.truncated ? "limited for UI performance" : "all rows loaded"}</small></div>
+          <div><span>Max delta in preview</span><strong>${fmtNum(maxWhite?.delta ?? 0, 0)}</strong><small>DN above threshold</small></div>
+          <div><span>Input assumption</span><strong>Dark</strong><small>黒画像で評価</small></div>
+        </div>
+      </div>
+    `;
+  }
+  if (els.profileStatsWrap) els.profileStatsWrap.classList.add("hidden");
+  if (els.profilePeaksWrap) els.profilePeaksWrap.classList.add("hidden");
+}
+
 function renderCsvTable(csv) {
   els.csvTableWrap.innerHTML = "";
   csv = withProfileDerivedColumns(csv);
   renderProfileChart(csv);
+  if (isDefectPixelCsv(csv)) renderDefectPixelSummary(csv);
   if (!csv.headers.length) { els.csvInfo.textContent = "CSV is empty"; return; }
   const table = document.createElement("table");
   const thead = document.createElement("thead");
@@ -1034,6 +1208,11 @@ function renderCsvTable(csv) {
   const tbody = document.createElement("tbody");
   csv.rows.forEach((row) => {
     const tr = document.createElement("tr");
+    if (isDefectPixelCsv(csv)) {
+      const typeIdx = numericColumnIndex(csv.headers, "type");
+      const kind = String(row[typeIdx] || "").toLowerCase();
+      if (kind === "white") tr.classList.add("defect-row-white");
+          }
     if (indexCol >= 0) {
       const idx = Number(row[indexCol]);
       if (Number.isFinite(idx)) {
@@ -1060,13 +1239,19 @@ function renderCsvTable(csv) {
   table.appendChild(tbody); els.csvTableWrap.appendChild(table);
   clearSelectedCsvRow();
   if (state.selectedProfilePoint) selectCsvRowForProfilePoint(state.selectedProfilePoint, false);
-  els.csvInfo.textContent = `${csv.rows.length} rows loaded${csv.truncated ? " (preview truncated at 100000 rows)" : ""}`;
+  const totalRows = Number.isFinite(Number(csv.total_rows)) ? Number(csv.total_rows) : csv.rows.length;
+  els.csvInfo.textContent = csv.truncated
+    ? `${csv.rows.length} of ${totalRows} rows loaded (preview limited for performance; full CSV is saved)`
+    : `${csv.rows.length} rows loaded`;
 }
 
 async function loadCsv(path = state.lastOutputCsv || state.lastCsvPath) {
   if (!path) { els.csvInfo.textContent = "No CSV loaded"; els.csvTableWrap.innerHTML = ""; els.profileChartWrap.classList.add("hidden"); return; }
   try {
-    const csv = await invoke("read_csv_preview", { path, maxRows: 100000 });
+    const isDefect = state.lastAnalysis === "white_defect_pixels" || els.analysisType.value === "white_defect_pixels";
+    const maxRows = isDefect ? 2000 : 100000;
+    els.csvInfo.textContent = isDefect ? "Loading CSV preview... large defect lists are limited to 2000 rows" : "Loading CSV...";
+    const csv = await invoke("read_csv_preview", { path, maxRows });
     state.lastCsvData = csv;
     renderCsvTable(csv);
     state.lastCsvPath = path;
@@ -1100,9 +1285,18 @@ async function chooseImagej() {
   const path = await open({ multiple: false, directory: false });
   if (path) { els.imagejPath.value = path; saveSettings(); }
 }
+function looksLikeRawPath(path) {
+  return /\.(raw|bin|dat|img)$/i.test(String(path || ""));
+}
+
 async function chooseInput() {
-  const path = await open({ multiple: false, directory: false, filters: [{ name: "Image", extensions: ["tif", "tiff", "png", "jpg", "jpeg", "bmp", "gif", "webp"] }] });
-  if (path) { els.inputImage.value = path; saveSettings(); await loadPreview(path); }
+  const path = await open({ multiple: false, directory: false, filters: [{ name: "Image / RAW", extensions: ["tif", "tiff", "png", "jpg", "jpeg", "bmp", "gif", "webp", "raw", "bin", "dat", "img"] }] });
+  if (path) {
+    els.inputImage.value = path;
+    updateRawSettingsPanel();
+    saveSettings();
+    await loadPreview(path);
+  }
 }
 async function chooseOutputDir() {
   const path = await open({ multiple: false, directory: true });
@@ -1133,15 +1327,23 @@ $("#btnDetect").addEventListener("click", async () => {
 });
 
 els.analysisType.addEventListener("change", () => { updateAnalysisPanels(); saveSettings(); });
-for (const el of [els.imagejPath, els.inputImage, els.outputDir, els.baseName, els.threshold, els.minArea, els.maxArea, els.roiX, els.roiY, els.roiW, els.roiH, els.showStderr]) {
+for (const el of [els.imagejPath, els.inputImage, els.outputDir, els.baseName, els.whiteThreshold, els.roiX, els.roiY, els.roiW, els.roiH, els.showStderr]) {
   el.addEventListener("change", saveSettings);
+}
+for (const el of [els.rawWidth, els.rawHeight, els.rawBitDepth, els.rawEndian, els.rawHeaderOffset]) {
+  el.addEventListener("change", () => { saveSettings(); updateRawSettingsPanel(); loadPreview(); });
+  el.addEventListener("input", () => { saveSettings(); updateRawSettingsPanel(); });
 }
 for (const el of [els.lineX1, els.lineY1, els.lineX2, els.lineY2]) {
   el.addEventListener("input", () => { saveSettings(); updatePreviewProfileLine(); });
   el.addEventListener("change", () => { saveSettings(); updatePreviewProfileLine(); });
 }
 els.previewLineEnabled.addEventListener("change", () => { saveSettings(); updatePreviewProfileLine(); });
-els.inputImage.addEventListener("change", () => { loadPreview(); updatePreviewProfileLine(); });
+els.inputImage.addEventListener("change", () => {
+  updateRawSettingsPanel();
+  loadPreview();
+  updatePreviewProfileLine();
+});
 
 $("#dropZone").addEventListener("dragover", (e) => { e.preventDefault(); $("#dropZone").classList.add("dragover"); });
 $("#dropZone").addEventListener("dragleave", () => $("#dropZone").classList.remove("dragover"));
@@ -1150,7 +1352,7 @@ $("#dropZone").addEventListener("drop", async (e) => {
   const file = e.dataTransfer.files?.[0];
   const path = file?.path || file?.webkitRelativePath || "";
   if (!path) { log("ドラッグ&ドロップではファイルパスを取得できませんでした。選択ボタンを使用してください。", "warn"); return; }
-  els.inputImage.value = path; saveSettings(); await loadPreview(path);
+  els.inputImage.value = path; updateRawSettingsPanel(); saveSettings(); await loadPreview(path);
 });
 
 els.btnRun.addEventListener("click", async () => {
@@ -1160,6 +1362,7 @@ els.btnRun.addEventListener("click", async () => {
     setRunning(true);
     status("Running", "running");
     log(`START ${request.analysis}`);
+    state.lastAnalysis = request.analysis;
     state.currentJobId = await invoke("start_analysis", { request });
     log(`Job accepted: ${state.currentJobId}`);
   } catch (e) {
@@ -1181,6 +1384,11 @@ listen("job-event", async (event) => {
     state.lastOutputCsv = output_csv;
     state.lastCsvPath = output_csv;
   }
+  if (level === "progress") {
+    status("Running", "running");
+    els.csvInfo.textContent = message;
+    return;
+  }
   log(message, level);
   if (level === "success") {
     setRunning(false); status("Completed", "success"); switchTab("result"); await loadCsv(output_csv || state.lastOutputCsv);
@@ -1192,7 +1400,7 @@ listen("job-event", async (event) => {
 listen("backend-ready", () => log("Backend ready"));
 
 loadSettings();
-log("Ready. Input image を選択し、設定タブで ImageJ/Fiji executable / Output directory / Base name を確認してください。");
+log("Ready. Input image を選択し、設定タブで Output directory / Base name を確認してください。Measure / Line Profileでは ImageJ/Fiji executable も必要です。");
 if (els.inputImage.value.trim()) loadPreview();
 updatePreviewProfileLine();
 

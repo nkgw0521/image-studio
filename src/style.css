@@ -836,3 +836,97 @@ tr.outlier-profile-row.selected-profile-row td {
   #tab-result .profile-peaks-wrap { max-height: 125px; }
   #tab-result .csv-table-wrap { min-height: 170px; }
 }
+
+/* Defect Pixel Analysis */
+tr.defect-row-white td {
+  background: #fff7ed;
+  color: #9a3412;
+}
+tr.defect-row-black td {
+  background: #eef2ff;
+  color: #3730a3;
+}
+tr.defect-row-white:hover td,
+tr.defect-row-black:hover td {
+  filter: brightness(0.98);
+}
+
+.raw-panel {
+  margin-top: 12px;
+}
+.input-format-panel {
+  padding: 12px 14px;
+  border: 1px solid #dbe4ef;
+  background: #f8fafc;
+}
+.input-format-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.input-format-header h3 {
+  margin: 0;
+}
+.raw-panel .check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  color: #334155;
+  white-space: nowrap;
+}
+.raw-panel .check input {
+  width: auto;
+}
+.raw-grid {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(120px, 1fr) minmax(150px, 1fr) minmax(130px, 1fr) minmax(150px, 1fr);
+  gap: 10px;
+  margin-top: 10px;
+}
+.raw-grid .field label {
+  white-space: nowrap;
+}
+.raw-grid input,
+.raw-grid select {
+  min-width: 0;
+  width: 100%;
+}
+@media (max-width: 1200px) {
+  .raw-grid { grid-template-columns: repeat(2, minmax(160px, 1fr)); }
+}
+@media (max-width: 720px) {
+  .input-format-header { align-items: flex-start; flex-direction: column; }
+  .raw-grid { grid-template-columns: 1fr; }
+}
+
+/* RAW input refinements */
+.raw-detected-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #e0f2fe;
+  color: #075985;
+  font-size: 12px;
+  font-weight: 700;
+}
+.raw-panel.input-format-panel {
+  margin-top: 12px;
+}
+.raw-grid {
+  grid-template-columns: repeat(5, minmax(130px, 1fr));
+}
+.raw-grid input,
+.raw-grid select {
+  height: 44px;
+  font-size: 15px;
+  padding: 8px 10px;
+}
+@media (max-width: 1400px) {
+  .raw-grid { grid-template-columns: repeat(3, minmax(150px, 1fr)); }
+}
+@media (max-width: 900px) {
+  .raw-grid { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
+}

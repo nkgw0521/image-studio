@@ -1,7 +1,6 @@
 use crate::job::{AnalysisKind, JobRequest, Roi};
 
 const MEASURE_TEMPLATE: &str = include_str!("../../macros/measure.ijm");
-const PARTICLES_TEMPLATE: &str = include_str!("../../macros/particles.ijm");
 const PROFILE_TEMPLATE: &str = include_str!("../../macros/profile.ijm");
 
 fn macro_string(s: &str) -> String {
@@ -28,8 +27,8 @@ fn render_template(template: &str, replacements: &[(&str, String)]) -> String {
 pub fn generate_macro(req: &JobRequest, output_csv: &str) -> String {
     match req.analysis {
         AnalysisKind::Measure => generate_measure(req, output_csv),
-        AnalysisKind::Particles => generate_particles(req, output_csv),
         AnalysisKind::Profile => generate_profile(req, output_csv),
+        AnalysisKind::WhiteDefectPixels => String::new(),
     }
 }
 
@@ -40,26 +39,6 @@ fn generate_measure(req: &JobRequest, output_csv: &str) -> String {
             ("${INPUT}", macro_string(&req.input_image)),
             ("${OUTPUT}", macro_string(output_csv)),
             ("${ROI_CODE}", roi_code(&req.roi)),
-        ],
-    )
-}
-
-fn generate_particles(req: &JobRequest, output_csv: &str) -> String {
-    let max_area = req.particles.max_area.unwrap_or(f64::INFINITY);
-    let size = if max_area.is_infinite() {
-        format!("{}-Infinity", req.particles.min_area)
-    } else {
-        format!("{}-{}", req.particles.min_area, max_area)
-    };
-
-    render_template(
-        PARTICLES_TEMPLATE,
-        &[
-            ("${INPUT}", macro_string(&req.input_image)),
-            ("${OUTPUT}", macro_string(output_csv)),
-            ("${ROI_CODE}", roi_code(&req.roi)),
-            ("${THRESHOLD}", macro_string(&req.particles.threshold)),
-            ("${SIZE}", size),
         ],
     )
 }
@@ -78,10 +57,11 @@ fn generate_profile(req: &JobRequest, output_csv: &str) -> String {
     )
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::job::{JobRequest, ParticleParams, ProfileParams};
+    use crate::job::{DefectPixelParams, JobRequest, ProfileParams, RawImageParams};
 
     fn base_request() -> JobRequest {
         JobRequest {
@@ -91,8 +71,8 @@ mod tests {
             base_name: "out".to_string(),
             analysis: AnalysisKind::Measure,
             roi: Some(Roi { x: 10, y: 20, width: 30, height: 40 }),
-            particles: ParticleParams::default(),
             profile: ProfileParams::default(),
+            defect_pixels: DefectPixelParams::default(),
         }
     }
 
@@ -111,8 +91,9 @@ mod tests {
         let mut req = base_request();
         req.analysis = AnalysisKind::Profile;
         let macro_text = generate_macro(&req, "C:/Results/out_20260629_132455.csv");
-        assert!(macro_text.contains("for (i = 0; i < profile.length; i++) {"));
+        assert!(macro_text.contains("for (i = 0; i < count; i++) {"));
         assert!(macro_text.contains("}"));
         assert!(!macro_text.contains("${"));
     }
+
 }

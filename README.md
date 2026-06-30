@@ -2,19 +2,19 @@
 
 Image Studio is a cross-platform image analysis application for Windows and Linux.
 
-It currently uses ImageJ/Fiji as the analysis engine and adds an application-side evaluation layer for preview, Line Profile charts, statistics, peak detection, outlier evaluation, CSV linkage, and camera-oriented inspection workflows.
+It uses ImageJ/Fiji for ImageJ-based analyses and also includes native Rust analysis for pixel-level camera evaluation. The application layer adds preview, Line Profile charts, statistics, peak detection, outlier evaluation, white-defect-pixel listing, CSV linkage, and camera-oriented inspection workflows.
 
 ## Current focus
 
-The current implementation focuses on building a practical Line Profile Analyzer for camera and image-quality evaluation.
+The current implementation focuses on practical camera and image-quality evaluation workflows, especially Line Profile analysis and white-defect-pixel listing.
 
 Typical workflow:
 
 ```text
 Open image
   -> Select analysis type
-  -> Configure Line Profile or ROI
-  -> Run ImageJ/Fiji in batch mode
+  -> Configure Line Profile, ROI, or white defect threshold
+  -> Run ImageJ/Fiji or native Rust analysis
   -> Load generated CSV
   -> Review graph, statistics, outliers, image overlay, and CSV table
 ```
@@ -37,6 +37,12 @@ Open image
 ```text
 <Output directory>/<Base name>_YYYYMMDD_HHMMSS.csv
 ```
+
+### Analysis engines
+
+- ImageJ/Fiji engine for ImageJ-compatible analyses
+- Rust native engine for White Defect Pixel analysis
+- RAW image loader for Rust native analyses
 
 ### ImageJ/Fiji integration
 
@@ -93,15 +99,61 @@ Line Profile includes:
 - Outlier evaluation
 - PASS/FAIL summary
 
-#### Particle Analysis
+#### White Defect Pixel
 
-Runs threshold-based particle analysis through ImageJ/Fiji.
+Lists bright pixels in a dark image that exceed the configured white-point threshold. This analysis runs in the Rust native engine, not through ImageJ/Fiji, so it is suitable for large camera images and RAW image files.
+
+Current CSV columns:
+
+```csv
+type,x,y,value,threshold,delta
+```
+
+Detection rule:
+
+```text
+white defect: value >= White threshold
+```
+
+Input image assumption:
+
+```text
+Dark image / black image
+```
 
 Typical use:
 
-- Dust detection
-- Scratch/defect candidate extraction
-- Binary particle counting
+- White-point defect listing
+- Bright pixel screening on dark frames
+- Camera sensor evaluation
+
+`Particle Analysis` was removed from the main analysis menu for now. Pixel-level defects are better handled by dedicated defect-pixel analyses instead of area-based particle detection. Black defect detection should be implemented as a separate analysis because it requires a bright image.
+
+
+## RAW image input
+
+Image Studio can treat the input file as a raw image by enabling **RAW image** in the input-format section below the input file path.
+
+RAW input is an input format setting, not an Analysis-specific setting. In the current implementation, RAW files are processed by Rust-native analyses such as `White Defect Pixel`. ImageJ/Fiji-based analyses still require formats that ImageJ can open directly.
+
+RAW parameters:
+
+- `Width`
+- `Height`
+- `Bit depth`
+- `Endian`
+- `Header offset`
+
+Current RAW support:
+
+| Format | Status | Notes |
+|---|---:|---|
+| 8-bit RAW | Supported | 1 byte/pixel |
+| 10/12/14-bit RAW | Supported as unpacked 16-bit container | 2 bytes/pixel |
+| 16-bit RAW | Supported | 2 bytes/pixel |
+| Packed RAW | Not supported yet | planned separately if needed |
+
+RAW preview is not implemented yet. When RAW mode is enabled, the preview pane uses the configured Width/Height as the image size for analysis parameters, but it does not render the raw image. The RAW settings are intentionally placed next to the input image path because they describe the file format itself.
 
 ## Line Profile evaluation
 
@@ -146,6 +198,18 @@ The following views are synchronized:
 
 Clicking a chart point, CSV row, or peak row selects the corresponding sample.
 
+## White Defect Pixel analysis
+
+White Defect Pixel scans the selected dark image or ROI and writes all pixels above the threshold to CSV.
+
+Parameter:
+
+- `White threshold`: pixels greater than or equal to this value are listed as `white` defects.
+
+The Result tab shows a compact summary with the white count and maximum threshold delta. The CSV table remains the authoritative list of detected pixels.
+
+Black defect detection is intentionally not included in this analysis. It will be added later as a separate analysis type for bright-image evaluation.
+
 ## Preview line overlay
 
 When the analysis type is `Line Profile`, Image Studio displays the configured line on the image preview.
@@ -166,7 +230,8 @@ The overlay is display-only. Direct mouse dragging on the preview to set `X1/Y1/
 
 ### Runtime
 
-- ImageJ or Fiji
+- ImageJ or Fiji for Measure / Line Profile
+- White Defect Pixel can run without ImageJ/Fiji
 - Windows or Linux
 
 ### Development
@@ -234,14 +299,15 @@ Future analysis engines can be added without changing the user-facing workflow:
 ```text
 Analysis Engine
   - ImageJ/Fiji       current
-  - Rust native       planned
+  - Rust native       planned for pixel/statistics-heavy camera evaluation
   - OpenCV            candidate
 ```
 
 ## Known limitations
 
 - Image preview support depends on WebView image decoding. PNG/JPEG/BMP are usually stable; TIFF support may vary.
-- ImageJ/Fiji is currently required for analysis execution.
+- ImageJ/Fiji is required for Measure and Line Profile. Rust-native analyses such as White Defect Pixel do not require ImageJ/Fiji.
+- RAW preview is not implemented yet.
 - Preview-line dragging is not implemented yet.
 - Graph zoom/pan is not implemented yet.
 - Row Mean Profile and Column Mean Profile are not implemented yet.
@@ -254,6 +320,7 @@ Analysis Engine
 - Row Mean Profile
 - Column Mean Profile
 - Shutter Line Detection
+- Defect-pixel overlay on image preview
 - Graph zoom/pan
 - Direct line drawing on the image preview
 - Profile width / averaged profile
@@ -284,3 +351,34 @@ Image Studio is intended to grow toward a camera-oriented image evaluation workb
 The Result tab uses the whole `CSV Result` card as the scroll container.
 This keeps the chart, evaluation summary, statistics, peak tables, and CSV rows in one continuous result view, avoiding clipping on smaller screens.
 The CSV header remains sticky while scrolling through the result panel.
+
+## Large CSV and performance policy
+
+White Defect Pixel can generate very large CSV files when many pixels exceed the threshold. The application therefore uses a preview-oriented result display:
+
+- The full CSV is always written to disk.
+- The GUI loads only the first 2,000 defect rows for White Defect Pixel to keep tab switching responsive.
+- The total number of detected rows is counted from the CSV and shown in the summary.
+- CSV loading is streamed in Rust and does not read the whole file into memory.
+- During Rust native scanning, progress events are emitted so the user can distinguish long processing from a frozen application.
+
+This is intentional. The CSV file is the complete record; the GUI preview is for quick inspection and navigation.
+
+
+## RAW input support
+
+RAW files are detected by file extension (`.raw`, `.bin`, `.dat`, `.img`).
+No separate RAW checkbox is required. When a RAW file is selected, the RAW settings panel is shown automatically.
+
+Supported RAW formats in the current implementation:
+
+- 8-bit unpacked grayscale RAW: 1 byte per pixel
+- 10/12/14/16-bit unpacked grayscale RAW: 2 bytes per pixel
+- Little endian / big endian selection for 16-bit based formats
+- Header offset in bytes
+
+Packed RAW formats are not supported yet.
+
+RAW preview is generated by the Rust backend as an 8-bit grayscale PNG preview. This allows incorrect width, height, bit depth, endian, or offset settings to be noticed before running an analysis.
+
+White Defect Pixel can use RAW input directly without ImageJ/Fiji.

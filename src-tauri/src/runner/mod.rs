@@ -1,9 +1,9 @@
 use crate::error::AppError;
-use crate::job::{JobRequest, JobState, RunningJob};
+use crate::job::{AnalysisKind, JobRequest, JobState, RawImageParams, RunningJob};
 use crate::macrogen::generate_macro;
 use serde::Serialize;
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -40,6 +40,11 @@ pub fn run_job_async(app: AppHandle, req: JobRequest) -> Result<u64, AppError> {
 
     let output_csv = make_output_csv_path(&req)?;
     ensure_output_dir(&req)?;
+
+    if matches!(req.analysis, AnalysisKind::WhiteDefectPixels) {
+        return run_white_defect_pixels_native(app, id, req, output_csv);
+    }
+
     let macro_path = write_macro_file(id, &req, &output_csv)?;
     let mut command = Command::new(&req.imagej_path);
     command
@@ -121,6 +126,221 @@ pub fn run_job_async(app: AppHandle, req: JobRequest) -> Result<u64, AppError> {
     Ok(id)
 }
 
+
+fn run_white_defect_pixels_native(app: AppHandle, id: u64, req: JobRequest, output_csv: PathBuf) -> Result<u64, AppError> {
+    emit(&app, id, "info", "START WhiteDefectPixels");
+    emit(&app, id, "info", "Engine: Rust native white defect pixel scanner");
+    emit(&app, id, "info", format!("Input: {}", req.input_image));
+    emit(&app, id, "info", format!("Output CSV: {}", output_csv.display()));
+    emit(&app, id, "info", format!("White threshold: {}", req.defect_pixels.white_threshold));
+
+    let app2 = app.clone();
+    thread::spawn(move || {
+        match scan_white_defect_pixels(&app2, id, &req, &output_csv) {
+            Ok(summary) => {
+                emit(&app2, id, "info", summary);
+                emit_with_output(&app2, id, "success", format!("DONE: output CSV created: {}", output_csv.display()), Some(output_csv.to_string_lossy().to_string()));
+            }
+            Err(e) => {
+                emit(&app2, id, "error", format!("FAILED: {e}"));
+            }
+        }
+    });
+
+    Ok(id)
+}
+
+fn scan_white_defect_pixels(app: &AppHandle, id: u64, req: &JobRequest, output_csv: &Path) -> Result<String, AppError> {
+    if req.raw_image.enabled {
+        return scan_white_defect_pixels_raw(app, id, req, output_csv);
+    }
+
+    let img = image::open(&req.input_image)
+        .map_err(|e| AppError::Validation(format!("failed to open image: {e}")))?;
+    let width = img.width();
+    let height = img.height();
+    let bits_per_channel = img.color().bits_per_pixel() / u16::from(img.color().channel_count().max(1));
+    let use_u16 = bits_per_channel > 8;
+
+    let (rx, ry, rw, rh) = match &req.roi {
+        Some(r) => (r.x.max(0) as u32, r.y.max(0) as u32, r.width.max(0) as u32, r.height.max(0) as u32),
+        None => (0, 0, width, height),
+    };
+    let x_end = rx.saturating_add(rw).min(width);
+    let y_end = ry.saturating_add(rh).min(height);
+
+    if rx >= width || ry >= height || x_end <= rx || y_end <= ry {
+        return Err(AppError::Validation("ROI is outside the image".into()));
+    }
+
+    let white_threshold = req.defect_pixels.white_threshold.max(0) as u32;
+
+    let file = fs::File::create(output_csv)?;
+    let mut writer = BufWriter::new(file);
+    writeln!(writer, "type,x,y,value,threshold,delta")?;
+
+    let mut white_count: u64 = 0;
+    let mut scanned: u64 = 0;
+    let total_scan: u64 = u64::from(x_end - rx) * u64::from(y_end - ry);
+    let progress_row_step: u32 = ((y_end - ry) / 20).max(1);
+
+    emit(app, id, "progress", format!("Scanning 0/{total_scan} px (0.0%), defects=0"));
+
+    if use_u16 {
+        let gray = img.to_luma16();
+        for y in ry..y_end {
+            for x in rx..x_end {
+                scanned += 1;
+                let value = u32::from(gray.get_pixel(x, y).0[0]);
+                if value >= white_threshold {
+                    white_count += 1;
+                    let delta = i64::from(value) - i64::from(white_threshold);
+                    writeln!(writer, "white,{x},{y},{value},{white_threshold},+{delta}")?;
+                }
+            }
+            if (y - ry) % progress_row_step == 0 || y + 1 == y_end {
+                let pct = if total_scan > 0 { (scanned as f64) * 100.0 / (total_scan as f64) } else { 100.0 };
+                emit(app, id, "progress", format!("Scanning {scanned}/{total_scan} px ({pct:.1}%), defects={white_count}"));
+            }
+        }
+    } else {
+        let gray = img.to_luma8();
+        for y in ry..y_end {
+            for x in rx..x_end {
+                scanned += 1;
+                let value = u32::from(gray.get_pixel(x, y).0[0]);
+                if value >= white_threshold {
+                    white_count += 1;
+                    let delta = i64::from(value) - i64::from(white_threshold);
+                    writeln!(writer, "white,{x},{y},{value},{white_threshold},+{delta}")?;
+                }
+            }
+            if (y - ry) % progress_row_step == 0 || y + 1 == y_end {
+                let pct = if total_scan > 0 { (scanned as f64) * 100.0 / (total_scan as f64) } else { 100.0 };
+                emit(app, id, "progress", format!("Scanning {scanned}/{total_scan} px ({pct:.1}%), defects={white_count}"));
+            }
+        }
+    }
+    writer.flush()?;
+
+    Ok(format!(
+        "Native white defect scan complete: scanned={} px, white={}, source_depth={} bit/channel",
+        scanned,
+        white_count,
+        bits_per_channel
+    ))
+}
+
+
+fn scan_white_defect_pixels_raw(app: &AppHandle, id: u64, req: &JobRequest, output_csv: &Path) -> Result<String, AppError> {
+    let raw = &req.raw_image;
+    validate_raw_file_size(&req.input_image, raw)?;
+
+    let bytes_per_pixel: u64 = if raw.bit_depth <= 8 { 1 } else { 2 };
+    let width = raw.width;
+    let height = raw.height;
+    let row_bytes = u64::from(width) * bytes_per_pixel;
+
+    let (rx, ry, rw, rh) = match &req.roi {
+        Some(r) => (r.x.max(0) as u32, r.y.max(0) as u32, r.width.max(0) as u32, r.height.max(0) as u32),
+        None => (0, 0, width, height),
+    };
+    let x_end = rx.saturating_add(rw).min(width);
+    let y_end = ry.saturating_add(rh).min(height);
+    if rx >= width || ry >= height || x_end <= rx || y_end <= ry {
+        return Err(AppError::Validation("ROI is outside the RAW image".into()));
+    }
+
+    let white_threshold = req.defect_pixels.white_threshold.max(0) as u32;
+    let file = fs::File::create(output_csv)?;
+    let mut writer = BufWriter::new(file);
+    writeln!(writer, "type,x,y,value,threshold,delta")?;
+
+    let mut input = fs::File::open(&req.input_image)?;
+    let mut white_count: u64 = 0;
+    let mut scanned: u64 = 0;
+    let total_scan: u64 = u64::from(x_end - rx) * u64::from(y_end - ry);
+    let progress_row_step: u32 = ((y_end - ry) / 20).max(1);
+    let little_endian = raw.endian.eq_ignore_ascii_case("little");
+
+    emit(app, id, "info", format!("RAW input: {} x {}, {} bit, {} endian, offset {}", raw.width, raw.height, raw.bit_depth, raw.endian, raw.header_offset));
+    emit(app, id, "progress", format!("Scanning RAW 0/{total_scan} px (0.0%), defects=0"));
+
+    if bytes_per_pixel == 1 {
+        let mut row = vec![0u8; (x_end - rx) as usize];
+        for y in ry..y_end {
+            let offset = raw.header_offset + u64::from(y) * row_bytes + u64::from(rx);
+            input.seek(SeekFrom::Start(offset))?;
+            input.read_exact(&mut row)?;
+            for (i, b) in row.iter().enumerate() {
+                scanned += 1;
+                let value = u32::from(*b);
+                if value >= white_threshold {
+                    white_count += 1;
+                    let x = rx + i as u32;
+                    let delta = i64::from(value) - i64::from(white_threshold);
+                    writeln!(writer, "white,{x},{y},{value},{white_threshold},+{delta}")?;
+                }
+            }
+            if (y - ry) % progress_row_step == 0 || y + 1 == y_end {
+                let pct = if total_scan > 0 { (scanned as f64) * 100.0 / (total_scan as f64) } else { 100.0 };
+                emit(app, id, "progress", format!("Scanning RAW {scanned}/{total_scan} px ({pct:.1}%), defects={white_count}"));
+            }
+        }
+    } else {
+        let mut row = vec![0u8; (x_end - rx) as usize * 2];
+        for y in ry..y_end {
+            let offset = raw.header_offset + u64::from(y) * row_bytes + u64::from(rx) * 2;
+            input.seek(SeekFrom::Start(offset))?;
+            input.read_exact(&mut row)?;
+            for (i, chunk) in row.chunks_exact(2).enumerate() {
+                scanned += 1;
+                let value16 = if little_endian {
+                    u16::from_le_bytes([chunk[0], chunk[1]])
+                } else {
+                    u16::from_be_bytes([chunk[0], chunk[1]])
+                };
+                let value = u32::from(value16);
+                if value >= white_threshold {
+                    white_count += 1;
+                    let x = rx + i as u32;
+                    let delta = i64::from(value) - i64::from(white_threshold);
+                    writeln!(writer, "white,{x},{y},{value},{white_threshold},+{delta}")?;
+                }
+            }
+            if (y - ry) % progress_row_step == 0 || y + 1 == y_end {
+                let pct = if total_scan > 0 { (scanned as f64) * 100.0 / (total_scan as f64) } else { 100.0 };
+                emit(app, id, "progress", format!("Scanning RAW {scanned}/{total_scan} px ({pct:.1}%), defects={white_count}"));
+            }
+        }
+    }
+    writer.flush()?;
+
+    Ok(format!(
+        "Native RAW white defect scan complete: scanned={} px, white={}, raw={}x{} {}bit {} endian",
+        scanned,
+        white_count,
+        raw.width,
+        raw.height,
+        raw.bit_depth,
+        raw.endian
+    ))
+}
+
+fn validate_raw_file_size(input_path: &str, raw: &RawImageParams) -> Result<(), AppError> {
+    let bytes_per_pixel: u64 = if raw.bit_depth <= 8 { 1 } else { 2 };
+    let expected = raw.header_offset
+        .saturating_add(u64::from(raw.width).saturating_mul(u64::from(raw.height)).saturating_mul(bytes_per_pixel));
+    let actual = fs::metadata(input_path)?.len();
+    if actual < expected {
+        return Err(AppError::Validation(format!(
+            "RAW file is too small: actual={} bytes, expected at least={} bytes",
+            actual, expected
+        )));
+    }
+    Ok(())
+}
+
 pub fn cancel_current_job(app: &AppHandle) -> Result<(), AppError> {
     let state = app.state::<JobState>();
     let running = {
@@ -186,8 +406,8 @@ fn write_macro_file(id: u64, req: &JobRequest, output_csv: &Path) -> Result<Path
     fs::create_dir_all(&dir)?;
     let macro_path = dir.join(match req.analysis {
         crate::job::AnalysisKind::Measure => "measure.ijm",
-        crate::job::AnalysisKind::Particles => "particles.ijm",
         crate::job::AnalysisKind::Profile => "profile.ijm",
+        crate::job::AnalysisKind::WhiteDefectPixels => "white_defect_pixels_native.csv",
     });
     fs::write(&macro_path, generate_macro(req, &output_csv.to_string_lossy()))?;
     Ok(macro_path)
