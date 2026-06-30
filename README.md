@@ -1,36 +1,181 @@
 # Image Studio
 
-Cross-platform image analysis platform for Windows and Linux.
+Image Studio is a cross-platform image analysis application for Windows and Linux.
 
-Image Studio currently uses ImageJ/Fiji as the analysis engine and adds an application-side evaluation layer: preview, Line Profile graph, statistics, outlier detection, CSV linking, and camera-oriented analysis workflows.
+It currently uses ImageJ/Fiji as the analysis engine and adds an application-side evaluation layer for preview, Line Profile charts, statistics, peak detection, outlier evaluation, CSV linkage, and camera-oriented inspection workflows.
 
-Tauri v2 + Rust で Fiji/ImageJ を headless 実行する画像解析GUIです。
+## Current focus
 
-## Phase 3.0 の変更点
+The current implementation focuses on building a practical Line Profile Analyzer for camera and image-quality evaluation.
 
-- 画面をタブUIへ再構成
-  - 解析
-  - 結果
-  - ログ
-  - 設定
-- 初期表示では `Input image` と解析条件だけを表示
-- `ImageJ/Fiji executable`、`Output directory`、`Base name` は設定タブへ移動
-- ログはログタブへ移動
-- 成功時は結果タブへ自動遷移
-- エラー時はログタブへ自動遷移
-- 既存の非同期ジョブ実行、CSV自動生成、画像プレビューは維持
+Typical workflow:
 
-## 出力CSV仕様
+```text
+Open image
+  -> Select analysis type
+  -> Configure Line Profile or ROI
+  -> Run ImageJ/Fiji in batch mode
+  -> Load generated CSV
+  -> Review graph, statistics, outliers, image overlay, and CSV table
+```
 
-出力ファイルは以下の形式で自動生成されます。
+## Features
+
+### Application
+
+- Tauri v2 + Rust backend
+- Vite frontend
+- Windows/Linux oriented project structure
+- Image Studio application identity and icon
+- Tabbed UI:
+  - Analysis
+  - Result
+  - Log
+  - Settings
+- Timestamped CSV output:
 
 ```text
 <Output directory>/<Base name>_YYYYMMDD_HHMMSS.csv
 ```
 
-事前にCSVファイルを作成する必要はありません。
+### ImageJ/Fiji integration
 
-## 確認手順
+- ImageJ/Fiji executable selection
+- ImageJ/Fiji auto-detection attempt
+- ImageJ1-compatible batch execution
+- Generated ImageJ macro execution
+- CSV output validation
+- Runtime log forwarding to the GUI
+
+Fiji is recommended on Windows:
+
+```text
+C:\Fiji.app\ImageJ-win64.exe
+```
+
+### Supported analysis types
+
+#### Measure
+
+Measures image or ROI intensity statistics.
+
+Typical use:
+
+- Exposure check
+- Gain check
+- Saturation check
+- Basic brightness/noise confirmation
+
+#### Line Profile
+
+Samples pixel values along a line from `(X1, Y1)` to `(X2, Y2)`.
+
+Current CSV columns:
+
+```csv
+index,x,y,value,value_minus_mean
+```
+
+Line Profile includes:
+
+- Realtime red preview line overlay from current `X1/Y1/X2/Y2`
+- Full-width horizontal preset
+- Full-height vertical preset
+- Index-value chart
+- Mean line
+- ±3σ guide lines
+- Hover tooltip
+- Click-to-fix selected point
+- Image preview marker
+- CSV row synchronization
+- Statistics cards
+- Peak ranking
+- Outlier evaluation
+- PASS/FAIL summary
+
+#### Particle Analysis
+
+Runs threshold-based particle analysis through ImageJ/Fiji.
+
+Typical use:
+
+- Dust detection
+- Scratch/defect candidate extraction
+- Binary particle counting
+
+## Line Profile evaluation
+
+Line Profile is currently the most developed analysis mode.
+
+### Statistics
+
+The Result tab calculates and displays:
+
+- Mean
+- StdDev
+- Min
+- Max
+- Peak-to-Peak
+- RMS delta
+
+### Outlier rule
+
+Outliers are detected using:
+
+```text
+|value_minus_mean| >= max(DN threshold, sigma threshold * StdDev)
+```
+
+Default thresholds:
+
+```text
+DN threshold    = 5
+Sigma threshold = 3
+```
+
+A profile result is `PASS` when no samples exceed the effective threshold.
+
+### Interactive linkage
+
+The following views are synchronized:
+
+- Line Profile chart
+- Image preview marker/line overlay
+- Peak table
+- CSV table
+
+Clicking a chart point, CSV row, or peak row selects the corresponding sample.
+
+## Preview line overlay
+
+When the analysis type is `Line Profile`, Image Studio displays the configured line on the image preview.
+
+The preview line updates immediately when:
+
+- `X1` changes
+- `Y1` changes
+- `X2` changes
+- `Y2` changes
+- `Full-width Horizontal` is selected
+- `Full-height Vertical` is selected
+- The preview image is reloaded
+
+The overlay is display-only. Direct mouse dragging on the preview to set `X1/Y1/X2/Y2` is planned for a later phase.
+
+## Requirements
+
+### Runtime
+
+- ImageJ or Fiji
+- Windows or Linux
+
+### Development
+
+- Node.js LTS recommended
+- Rust toolchain
+- Tauri prerequisites for the target OS
+
+## Development commands
 
 ```bat
 npm install
@@ -39,113 +184,103 @@ cargo check --manifest-path src-tauri\Cargo.toml
 npm run tauri:dev
 ```
 
-この生成環境では `npm run build` は確認済みです。`cargo` は利用できないため、Rust/Tauri側の確認は手元で実施してください。
+Release build:
 
-## 推奨初期設定
+```bat
+npm run tauri:build
+```
 
-Windowsでは Fiji の以下を推奨します。
+## Project structure
 
 ```text
-C:\Fiji.app\ImageJ-win64.exe
+image-studio/
+  src/
+    main.js
+    style.css
+  src-tauri/
+    src/
+    macros/
+    icons/
+    Cargo.toml
+    tauri.conf.json
+  index.html
+  package.json
+  README.md
 ```
 
-既存の ImageJ1 でも動く可能性はありますが、headless/batch 実行の安定性は Fiji の方が高いです。
+## Architecture
 
-## Line Profile fix
-
-Line Profile no longer depends on ImageJ `Plot Profile` output. The generated macro samples pixels explicitly from `(X1,Y1)` to `(X2,Y2)` and writes:
-
-```csv
-index,x,y,value
+```text
++------------------------------+
+|        Image Studio GUI       |
+|     Tauri WebView / JS        |
++---------------+--------------+
+                |
+                v
++------------------------------+
+|       Rust/Tauri backend      |
+|  Job control / preview / CSV  |
++---------------+--------------+
+                |
+                v
++------------------------------+
+|        ImageJ/Fiji engine     |
+|      Macro execution / CSV    |
++------------------------------+
 ```
 
-For a horizontal full-width line, the row count should be approximately the image width. For a vertical full-height line, the row count should be approximately the image height.
+Future analysis engines can be added without changing the user-facing workflow:
 
-The Analysis tab also provides quick preset buttons:
+```text
+Analysis Engine
+  - ImageJ/Fiji       current
+  - Rust native       planned
+  - OpenCV            candidate
+```
 
-- `全幅 Horizontal`: center row, `x=0..width-1`
-- `全高 Vertical`: center column, `y=0..height-1`
+## Known limitations
 
-Note: ROI is not used by Line Profile. The line coordinates define the sampled region directly.
+- Image preview support depends on WebView image decoding. PNG/JPEG/BMP are usually stable; TIFF support may vary.
+- ImageJ/Fiji is currently required for analysis execution.
+- Preview-line dragging is not implemented yet.
+- Graph zoom/pan is not implemented yet.
+- Row Mean Profile and Column Mean Profile are not implemented yet.
+- Report export is not implemented yet.
 
+## Roadmap
 
-## Line Profile result preview fix
+### Phase 4 candidates
 
-CSV result preview now loads up to 100000 data rows instead of 200 rows. The previous 200-row display was a UI preview limit, not a Line Profile sampling limit.
+- Row Mean Profile
+- Column Mean Profile
+- Shutter Line Detection
+- Graph zoom/pan
+- Direct line drawing on the image preview
+- Profile width / averaged profile
+- HTML/PDF report export
 
-## Line Profile chart/display update
+### Camera evaluation direction
 
-- Line Profileの結果タブに、`index`を横軸、`value`を縦軸にした折れ線グラフを表示します。
-- グラフには平均値の基準線を表示します。
-- Line Profile CSVには `value_minus_mean` を追加し、各点の値がプロファイル平均からどれだけズレているかを確認できます。
-- 結果タブが非表示の状態でCSVを読み込んだ場合でも、タブ表示後に再描画して横幅を正しく使います。
+Image Studio is intended to grow toward a camera-oriented image evaluation workbench:
 
-## 2026-06-29 Line Profile hover tooltip
+- Line Profile
+- Row/Column statistics
+- Banding analysis
+- FPN analysis
+- Uniformity
+- Shutter line detection
+- Defect pixel inspection
 
-Line Profileの結果グラフに簡易ホバー表示を追加しました。
+## Development policy
 
-- グラフ上でマウスを動かすと、近傍点を赤丸で表示
-- 同時に縦カーソル線を表示
-- ツールチップに `index`, `x`, `y`, `value`, `delta` を表示
-- `delta` は `value - mean(value)` です
-
-今回の変更はフロントエンドのみです。
-
-## Phase 3 Line Profile analysis additions
-
-This build adds practical Line Profile review features:
-
-- Graph-to-image linkage: hover/click on a Line Profile chart shows the corresponding point on the image preview.
-- Profile statistics: Mean, StdDev, Min, Max, Peak-to-Peak, and RMS delta.
-- Peak detection: positive and negative delta Top 5 tables.
-- Chart overlays: mean line and +/-3 sigma guide lines.
-- Hover tooltip remains available with index, x, y, value, and delta.
-
-Clicking a chart point fixes the image marker until another point is selected.
-
-## Change: Line Profile selection linkage
-
-- Clicking the Line Profile chart now fixes the selected point.
-- The fixed point is shown on the chart and image preview.
-- The CSV table scrolls to the matching `index` row and highlights it.
-- Clicking a CSV row also fixes the corresponding chart/image marker.
-- Clicking a peak row also fixes the corresponding chart/image marker and scrolls the CSV table.
-
-## Phase 3.2: Line Profile evaluation
-
-Added Line Profile evaluation features:
-
-- Overall Evaluation card with PASS / FAIL.
-- DN threshold and sigma threshold inputs.
-- Outlier detection based on `|value_minus_mean| >= max(DN threshold, sigma threshold * StdDev)`.
-- Largest `|delta|` Top 10 table.
-- Outlier markers on the chart.
-- Outlier row highlighting in the CSV table.
-- Existing chart hover, click selection, image marker, CSV row sync are preserved.
-
-Default thresholds:
-
-- DN threshold: `5`
-- Sigma threshold: `3`
-
-A profile result is PASS when no samples exceed the effective threshold.
-
-## Phase 3.3 update
-
-Line Profileの評価UIを強化しました。
-
-- 画像プレビュー上にLine Profileの対象線を赤線オーバーレイ表示
-- グラフhover/click、Peak表クリック、CSV行クリックと画像オーバーレイを同期
-- Overall EvaluationにPASS/FAIL理由を表示
-- Max |Δ| / Outliersカードクリックで該当行へ移動
-- グラフ背景に±3σの正常領域を薄く表示
-
-今回の赤線オーバーレイは表示専用です。プレビュー上で線をドラッグしてX1/Y1/X2/Y2へ反映する操作は次フェーズ候補です。
+- Keep changes small and commit-oriented.
+- Update README when user-visible behavior changes.
+- Prefer reusable analysis/evaluation logic over one-off UI code.
+- Keep ImageJ/Fiji as an analysis engine, not as the application identity.
 
 
-## Phase 3.3 overlay redraw fix
+## Result panel scrolling
 
-- Fixed preview line overlay redraw when switching back from the Result tab to the Analysis tab.
-- Reworked image-coordinate to preview-coordinate mapping with visible image rectangle.
-- Added current Line Profile coordinate text below the preview for debugging.
-- Red line overlay is now drawn above the preview image with a stronger stroke.
+The Result tab uses the whole `CSV Result` card as the scroll container.
+This keeps the chart, evaluation summary, statistics, peak tables, and CSV rows in one continuous result view, avoiding clipping on smaller screens.
+The CSV header remains sticky while scrolling through the result panel.

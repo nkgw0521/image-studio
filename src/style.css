@@ -103,6 +103,23 @@ code { background: #e2e8f0; padding: 1px 5px; border-radius: 5px; }
 .panel-header { display: flex; justify-content: space-between; align-items: start; margin-bottom: 10px; gap: 10px; }
 .panel-header h2 { margin: 0 0 3px; }
 .button-row { display: flex; gap: 8px; }
+
+.preview-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.preview-line-toggle {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #334155;
+  white-space: nowrap;
+}
+.preview-line-toggle input {
+  width: auto;
+  margin-right: 5px;
+}
 .field { margin-bottom: 10px; min-width: 0; }
 .field label { display: block; margin-bottom: 5px; font-weight: 700; }
 .field label span { color: #dc2626; font-size: 12px; margin-left: 6px; }
@@ -500,4 +517,322 @@ tr.outlier-profile-row.selected-profile-row td {
 .profile-line-info {
   color: #b91c1c;
   font-weight: 700;
+}
+
+/* Result tab layout refinement: scroll the whole CSV Result panel.
+   The data table already has many rows; making only the table scroll causes
+   graph/statistics/peaks to be clipped on short screens. The result card itself
+   is now the scroll container. */
+#tab-result .full-card {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-bottom: 10px;
+  scrollbar-gutter: stable;
+}
+
+#tab-result .panel-header {
+  flex: 0 0 auto;
+  margin-bottom: 8px;
+}
+
+#tab-result .profile-chart-wrap {
+  margin-bottom: 8px;
+  padding: 10px;
+}
+
+#tab-result .chart-title-row {
+  margin-bottom: 6px;
+}
+
+#tab-result .chart-title-row h3 {
+  font-size: 15px;
+}
+
+#tab-result #profileChart {
+  height: 210px;
+}
+
+#tab-result .profile-eval-wrap,
+#tab-result .profile-stats-wrap,
+#tab-result .profile-peaks-wrap {
+  flex: 0 0 auto;
+}
+
+#tab-result .profile-eval-wrap {
+  margin-bottom: 8px;
+}
+
+#tab-result .eval-summary {
+  padding: 8px;
+  gap: 8px;
+  grid-template-columns: 180px 1fr;
+}
+
+#tab-result .eval-status strong {
+  font-size: 24px;
+}
+
+#tab-result .eval-status small {
+  font-size: 11px;
+}
+
+#tab-result .eval-metrics {
+  gap: 8px;
+}
+
+#tab-result .eval-metrics > div {
+  padding: 6px 8px;
+}
+
+#tab-result .eval-metrics strong {
+  font-size: 16px;
+}
+
+#tab-result .eval-metrics input {
+  padding: 4px 6px;
+}
+
+#tab-result .profile-stats-wrap {
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+#tab-result .stat-card {
+  padding: 7px 9px;
+}
+
+#tab-result .stat-card strong {
+  font-size: 16px;
+}
+
+#tab-result .stat-card span,
+#tab-result .stat-card small {
+  font-size: 11px;
+}
+
+#tab-result .profile-peaks-wrap {
+  grid-template-columns: 1.3fr 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 8px;
+  max-height: 170px;
+  overflow: auto;
+}
+
+#tab-result .peaks-table-wide {
+  grid-column: auto;
+}
+
+#tab-result .peaks-table h3 {
+  padding: 6px 9px;
+  font-size: 13px;
+}
+
+#tab-result .peaks-table table {
+  font-size: 11px;
+}
+
+#tab-result .peaks-table th,
+#tab-result .peaks-table td {
+  padding: 5px 7px;
+}
+
+#tab-result .csv-table-wrap {
+  flex: 0 0 auto;
+  min-height: 0;
+  overflow: visible;
+}
+
+#tab-result .csv-table-wrap table {
+  font-size: 12px;
+}
+
+#tab-result .csv-table-wrap th,
+#tab-result .csv-table-wrap td {
+  padding: 6px 8px;
+}
+
+@media (max-height: 820px) {
+  #tab-result #profileChart { height: 180px; }
+  #tab-result .profile-peaks-wrap { max-height: 145px; }
+}
+
+@media (max-width: 1180px) {
+  #tab-result .profile-peaks-wrap {
+    grid-template-columns: 1fr;
+    max-height: 260px;
+  }
+}
+
+
+/* Result tab fixed-header + internal CSV scroll refinement.
+   Keep chart/evaluation/peaks visible at the top of the Result tab, and make
+   only the CSV data table scroll. Avoid row.scrollIntoView() scrolling the
+   entire result panel by pairing this with container-local scrolling in JS. */
+#tab-result {
+  overflow: hidden;
+}
+
+#tab-result .full-card {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding-bottom: 12px;
+}
+
+#tab-result .profile-chart-wrap {
+  flex: 0 0 auto;
+}
+
+#tab-result #profileChart {
+  height: 185px;
+}
+
+#tab-result .profile-eval-wrap,
+#tab-result .profile-stats-wrap,
+#tab-result .profile-peaks-wrap {
+  flex: 0 0 auto;
+}
+
+#tab-result .profile-stats-wrap {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+#tab-result .profile-peaks-wrap {
+  grid-template-columns: 1.1fr 1fr 1fr;
+  max-height: 145px;
+  overflow: auto;
+}
+
+#tab-result .csv-table-wrap {
+  flex: 1 1 auto;
+  min-height: 220px;
+  overflow: auto;
+}
+
+#tab-result .csv-table-wrap th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+
+@media (max-height: 820px) {
+  #tab-result #profileChart { height: 155px; }
+  #tab-result .profile-peaks-wrap { max-height: 120px; }
+  #tab-result .stat-card { padding: 5px 7px; }
+}
+
+
+/* Result tab compact top-area fix.
+   Keep the CSV table internally scrollable, while making the chart/evaluation/
+   statistics/peak area compact enough not to clip the peak table headers or
+   the top rows on ordinary 1360x800-class windows. */
+#tab-result .full-card {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding-top: 12px;
+  padding-bottom: 12px;
+}
+
+#tab-result .panel-header {
+  margin-bottom: 6px;
+}
+
+#tab-result .profile-chart-wrap {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  margin-bottom: 7px;
+}
+
+#tab-result .chart-title-row {
+  margin-bottom: 4px;
+}
+
+#tab-result .chart-title-row h3 {
+  font-size: 14px;
+}
+
+#tab-result #profileChart {
+  height: 165px;
+}
+
+#tab-result .profile-eval-wrap {
+  margin-bottom: 6px;
+}
+
+#tab-result .eval-summary {
+  padding: 7px;
+  gap: 7px;
+}
+
+#tab-result .eval-status strong {
+  font-size: 22px;
+}
+
+#tab-result .eval-status small,
+#tab-result .eval-metrics small {
+  font-size: 10px;
+}
+
+#tab-result .eval-metrics > div {
+  padding: 5px 7px;
+}
+
+#tab-result .eval-metrics strong {
+  font-size: 15px;
+}
+
+#tab-result .eval-metrics input {
+  height: 28px;
+  padding: 3px 6px;
+}
+
+#tab-result .profile-stats-wrap {
+  gap: 7px;
+  margin-bottom: 6px;
+}
+
+#tab-result .stat-card {
+  padding: 6px 8px;
+}
+
+#tab-result .stat-card strong {
+  font-size: 15px;
+}
+
+#tab-result .profile-peaks-wrap {
+  flex: 0 0 auto;
+  grid-template-columns: 1.1fr 1fr 1fr;
+  gap: 7px;
+  max-height: 138px;
+  overflow: auto;
+  margin-bottom: 6px;
+  padding-bottom: 1px;
+  scrollbar-gutter: stable;
+}
+
+#tab-result .peaks-table h3 {
+  padding: 5px 8px;
+  font-size: 12px;
+  line-height: 1.15;
+}
+
+#tab-result .peaks-table th,
+#tab-result .peaks-table td {
+  padding: 4px 7px;
+  line-height: 1.2;
+}
+
+#tab-result .csv-table-wrap {
+  flex: 1 1 auto;
+  min-height: 190px;
+  overflow: auto;
+}
+
+@media (max-height: 820px) {
+  #tab-result #profileChart { height: 145px; }
+  #tab-result .profile-peaks-wrap { max-height: 125px; }
+  #tab-result .csv-table-wrap { min-height: 170px; }
 }

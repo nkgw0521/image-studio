@@ -18,6 +18,7 @@ const state = {
   selectedCsvRow: null,
   profileEval: { dnThreshold: 5, sigmaThreshold: 3 },
   profileLine: null,
+  previewLineEnabled: true,
 };
 
 const app = document.querySelector("#app");
@@ -46,7 +47,10 @@ app.innerHTML = `
               <h2>Image Preview</h2>
               <p class="muted">入力画像を確認します。PNG/JPEG/BMPは安定、TIFFはWebView対応に依存します。</p>
             </div>
-            <button id="btnRefreshPreview">更新</button>
+            <div class="preview-toolbar">
+              <label class="check preview-line-toggle"><input id="previewLineEnabled" type="checkbox" checked /> Preview Line</label>
+              <button id="btnRefreshPreview">更新</button>
+            </div>
           </div>
 
           <div class="main-input-row">
@@ -226,14 +230,14 @@ const els = {
   csvInfo: $("#csvInfo"), csvTableWrap: $("#csvTableWrap"), showStderr: $("#showStderr"),
   profileChartWrap: $("#profileChartWrap"), profileChart: $("#profileChart"), profileChartInfo: $("#profileChartInfo"), profileChartHover: $("#profileChartHover"),
   profileStatsWrap: $("#profileStatsWrap"), profilePeaksWrap: $("#profilePeaksWrap"), profileEvalWrap: $("#profileEvalWrap"), imageProfileMarker: $("#imageProfileMarker"),
-  imageProfileLineOverlay: $("#imageProfileLineOverlay"), imageProfileLine: $("#imageProfileLine"), profileLineInfo: $("#profileLineInfo"),
+  imageProfileLineOverlay: $("#imageProfileLineOverlay"), imageProfileLine: $("#imageProfileLine"), profileLineInfo: $("#profileLineInfo"), previewLineEnabled: $("#previewLineEnabled"),
   outputSummary: $("#outputSummary"),
 };
 
 function redrawPreviewOverlaySoon() {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      showProfileLine(state.profileLine);
+      updatePreviewProfileLine();
       if (state.selectedProfilePoint) showProfileMarker(state.selectedProfilePoint);
     });
   });
@@ -269,10 +273,13 @@ function loadSettings() {
   els.roiX.value = s.roiX ?? ""; els.roiY.value = s.roiY ?? ""; els.roiW.value = s.roiW ?? ""; els.roiH.value = s.roiH ?? "";
   els.lineX1.value = s.lineX1 ?? "0"; els.lineY1.value = s.lineY1 ?? "0"; els.lineX2.value = s.lineX2 ?? "100"; els.lineY2.value = s.lineY2 ?? "0";
   els.showStderr.checked = !!s.showStderr;
+  els.previewLineEnabled.checked = s.previewLineEnabled !== false;
+  state.previewLineEnabled = els.previewLineEnabled.checked;
   state.profileEval.dnThreshold = Number.isFinite(Number(s.profileEvalDnThreshold)) ? Number(s.profileEvalDnThreshold) : 5;
   state.profileEval.sigmaThreshold = Number.isFinite(Number(s.profileEvalSigmaThreshold)) ? Number(s.profileEvalSigmaThreshold) : 3;
   updateAnalysisPanels();
   updateOutputSummary();
+  updatePreviewProfileLine();
 }
 
 function saveSettings() {
@@ -283,6 +290,7 @@ function saveSettings() {
     roiX: els.roiX.value, roiY: els.roiY.value, roiW: els.roiW.value, roiH: els.roiH.value,
     lineX1: els.lineX1.value, lineY1: els.lineY1.value, lineX2: els.lineX2.value, lineY2: els.lineY2.value,
     showStderr: els.showStderr.checked,
+    previewLineEnabled: els.previewLineEnabled.checked,
     profileEvalDnThreshold: state.profileEval.dnThreshold,
     profileEvalSigmaThreshold: state.profileEval.sigmaThreshold,
   };
@@ -366,6 +374,26 @@ function requestFromUi() {
 function updateAnalysisPanels() {
   els.particlesPanel.classList.toggle("hidden", els.analysisType.value !== "particles");
   els.profilePanel.classList.toggle("hidden", els.analysisType.value !== "profile");
+  updatePreviewProfileLine();
+}
+
+function readProfileLineFromInputs() {
+  const vals = [els.lineX1.value, els.lineY1.value, els.lineX2.value, els.lineY2.value].map((v) => Number(String(v ?? "").trim()));
+  if (!vals.every(Number.isFinite)) return null;
+  if (vals[0] === vals[2] && vals[1] === vals[3]) return null;
+  return { x1: vals[0], y1: vals[1], x2: vals[2], y2: vals[3] };
+}
+
+function updatePreviewProfileLine() {
+  state.previewLineEnabled = !!els.previewLineEnabled?.checked;
+  if (!state.previewLineEnabled || els.analysisType.value !== "profile") {
+    hideProfileLine();
+    return;
+  }
+  const line = readProfileLineFromInputs();
+  state.profileLine = line;
+  if (line) showProfileLine(line);
+  else hideProfileLine();
 }
 
 async function loadPreview(path = els.inputImage.value.trim()) {
@@ -379,7 +407,7 @@ async function loadPreview(path = els.inputImage.value.trim()) {
       state.imageWidth = els.imagePreview.naturalWidth;
       state.imageHeight = els.imagePreview.naturalHeight;
       els.previewInfo.textContent = `${preview.file_name} / ${state.imageWidth} x ${state.imageHeight}`;
-      showProfileLine(state.profileLine);
+      updatePreviewProfileLine();
       if (state.selectedProfilePoint) showProfileMarker(state.selectedProfilePoint);
     };
     els.imagePreview.onerror = () => {
@@ -429,6 +457,7 @@ function hideProfileLine() {
 function showProfileLine(line = state.profileLine) {
   const overlay = els.imageProfileLineOverlay;
   const svgLine = els.imageProfileLine;
+  if (!state.previewLineEnabled || els.analysisType.value !== "profile") { hideProfileLine(); return; }
   if (!overlay || !svgLine || !line) { hideProfileLine(); return; }
   const m = previewImageMetrics();
   if (!m) {
@@ -951,7 +980,9 @@ function selectCsvRowForProfilePoint(point, shouldScroll = true) {
   row.classList.add("selected-profile-row");
   state.selectedCsvRow = row;
   if (shouldScroll) {
-    row.scrollIntoView({ block: "center", inline: "nearest", behavior: "smooth" });
+    const rowCenter = row.offsetTop + row.offsetHeight / 2;
+    const targetTop = Math.max(0, rowCenter - els.csvTableWrap.clientHeight / 2);
+    els.csvTableWrap.scrollTo({ top: targetTop, behavior: "smooth" });
   }
 }
 
@@ -1053,6 +1084,7 @@ function setProfileHorizontalFull() {
   els.lineX1.value = 0; els.lineY1.value = y;
   els.lineX2.value = state.imageWidth - 1; els.lineY2.value = y;
   saveSettings();
+  updatePreviewProfileLine();
 }
 
 function setProfileVerticalFull() {
@@ -1061,6 +1093,7 @@ function setProfileVerticalFull() {
   els.lineX1.value = x; els.lineY1.value = 0;
   els.lineX2.value = x; els.lineY2.value = state.imageHeight - 1;
   saveSettings();
+  updatePreviewProfileLine();
 }
 
 async function chooseImagej() {
@@ -1100,10 +1133,15 @@ $("#btnDetect").addEventListener("click", async () => {
 });
 
 els.analysisType.addEventListener("change", () => { updateAnalysisPanels(); saveSettings(); });
-for (const el of [els.imagejPath, els.inputImage, els.outputDir, els.baseName, els.threshold, els.minArea, els.maxArea, els.roiX, els.roiY, els.roiW, els.roiH, els.lineX1, els.lineY1, els.lineX2, els.lineY2, els.showStderr]) {
+for (const el of [els.imagejPath, els.inputImage, els.outputDir, els.baseName, els.threshold, els.minArea, els.maxArea, els.roiX, els.roiY, els.roiW, els.roiH, els.showStderr]) {
   el.addEventListener("change", saveSettings);
 }
-els.inputImage.addEventListener("change", () => loadPreview());
+for (const el of [els.lineX1, els.lineY1, els.lineX2, els.lineY2]) {
+  el.addEventListener("input", () => { saveSettings(); updatePreviewProfileLine(); });
+  el.addEventListener("change", () => { saveSettings(); updatePreviewProfileLine(); });
+}
+els.previewLineEnabled.addEventListener("change", () => { saveSettings(); updatePreviewProfileLine(); });
+els.inputImage.addEventListener("change", () => { loadPreview(); updatePreviewProfileLine(); });
 
 $("#dropZone").addEventListener("dragover", (e) => { e.preventDefault(); $("#dropZone").classList.add("dragover"); });
 $("#dropZone").addEventListener("dragleave", () => $("#dropZone").classList.remove("dragover"));
@@ -1156,5 +1194,6 @@ listen("backend-ready", () => log("Backend ready"));
 loadSettings();
 log("Ready. Input image を選択し、設定タブで ImageJ/Fiji executable / Output directory / Base name を確認してください。");
 if (els.inputImage.value.trim()) loadPreview();
+updatePreviewProfileLine();
 
 window.addEventListener("resize", () => redrawPreviewOverlaySoon());
